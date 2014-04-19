@@ -1,5 +1,5 @@
-fill-script () {
+fill_script () {
     template="plugins/script/templates/SCRIPT.tmpl"
     pattern="{{SCRIPTFILE}}"
-    fill-tool-var $template $pattern
+    fill_tool_var $template $pattern
 }

@@ -1,5 +1,5 @@
-fill-lfetool-files () {
+fill_lfetool_files () {
     template="plugins/lfetool/templates/usage.txt.tmpl"
     pattern="{{USAGE}}"
-    fill-tool-var $template $pattern
+    fill_tool_var $template $pattern
 }

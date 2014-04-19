@@ -39,6 +39,65 @@ yawsbootstrapfontsvg="{{YAWSBOOTSTRAPFONTSVG}}"
 yawsbootstrapfontttf="{{YAWSBOOTSTRAPFONTTTF}}"
 yawsbootstrapfontwoff="{{YAWSBOOTSTRAPFONTWOFF}}"
 
+unalias ls 2>/dev/null
+
+OS_TYPE=Unix
+case `uname -s` in
+    CYGWIN_NT*)
+        OS_TYPE=Cygwin
+        ;;
+    Windows_NT)
+        OS_TYPE=Windows
+        ;;
+    SunOS)
+        case `uname -r` in
+            4*) OS_TYPE=SUNBSD ;;
+            5*) OS_TYPE=SOLARIS ;;
+        esac
+        ;;
+    Linux)
+        OS_TYPE=LINUX
+        ;;
+    Darwin)
+        OS_TYPE=Darwin
+        ;;
+    *)
+        ;;
+esac
+
+expr_cmd=expr
+if [ $OS_TYPE = SOLARIS ]; then
+    expr_cmd=/usr/ucb/expr      # for commands substr, index, etc
+fi
+
+# echon -- echo with no trailing newline
+echon()
+{
+    if [ $OS_TYPE = Cygwin ] || [ $OS_TYPE = LINUX ]; then
+        echo -n "$*"
+    elif [ -x /usr/ucb/echo ] ; then
+        /usr/ucb/echo -n "$*"
+    elif [ -x /bin/echo ] ; then
+        /bin/echo "$*\\c"
+    elif [ -x /usr/bin/echo ] ; then
+        /usr/bin/echo "$*\\c"
+    else # we give up and allow a trailing newline
+        echo "$*"
+    fi
+}
+
+echoe()
+{
+    case $OS_TYPE in
+        LINUX|Cygwin)
+            echo -e "$*"
+            ;;
+        *)
+            echo "$*"
+            ;;
+    esac
+}
+
 DEPS=./deps
 TEST_DIR=./test
 TEST_OUT_DIR=./.eunit
@@ -67,10 +126,12 @@ BOLD_WHITE="\033[1;37;40m"
 END_COLOR="\033[m"
 
 decode () {
-    os=`uname`
-    case $os in
+    case $OS_TYPE in
         Darwin)
             base64 -D
+            ;;
+        LINUX|Cygwin)
+            base64 -d
             ;;
         *)
             base64 -d
@@ -78,10 +139,10 @@ decode () {
     esac
 }
 
-print-usage () {
-    local fullpath=$1
-    local version=$2
-    local script=`basename $fullpath`
+print_usage () {
+    fullpath=$1
+    version=$2
+    script=`basename $fullpath`
     echo "$usage" | decode | sed \
         -e "s#{{SCRIPT}}#$script#g" \
         -e "s#{{FULLPATH}}#$fullpath#g" \
@@ -89,72 +150,74 @@ print-usage () {
 }
 
 error () {
-    local message=$1
+    message=$1
     echo
     echo $message
     echo
-    print-usage $script
+    print_usage $script
     exit 1
 }
 
-unknown-command-error () {
-    local command=$1
+unknown_command_error () {
+    command=$1
     error "Unknown command: '$command'";
 }
 
-unknown-subcommand-error () {
-    local command=$1
-    local subcommand=$2
+unknown_subcommand_error () {
+    command=$1
+    subcommand=$2
     error "Unknown subcommand for '$command': '$subcommand'";
 }
 
-unknown-context-error () {
-    local context=$1
+unknown_context_error () {
+    context=$1
     error "Unknown context: '$context'";
 }
 
-missing-context-error () {
+missing_context_error () {
     error "Error: command requires context"
 }
 
-missing-arg-error () {
+missing_arg_error () {
     error "Error: context requires arg"
 }
 
-not-implemented-error () {
+not_implemented_error () {
     error "Error: not yet implemented"
 }
 
-lfetool-not-found-error () {
+lfetool_not_found_error () {
     error 'Error: could not find `lfetool` on the $PATH'
 }
 
-clone-repo () {
+clone_repo () {
     git clone --depth 1 $url
 }
 
-download-file () {
+download_file () {
     url=$1
     echo "Downloading $url ..."
-    curl -O "$url" &> /dev/null && \
+    curl -O "$url" > /dev/null 2>&1 && \
     echo "Download succeeded." || \
     echo "Download failed."
 }
 
-get-install-dir () {
-    erl -eval 'io:fwrite(code:lib_dir()), halt().' -run init stop -noshell
+get_install_dir () {
+    #erl -eval 'io:fwrite(code:lib_dir()), halt().' -run init stop -noshell
+    erl -eval 'io:fwrite(re:replace(code:lib_dir(), "~", "~~", [{return,list}])), halt().' -run init stop -noshell
+
 }
 
-install-file () {
-    local src=$1
-    local directory=$2
-    local mode=$3
-    local msg=""
-    if [ "$directory" = "" ]; then
+install_file () {
+    src=$1
+    directory=$2
+    mode=$3
+    msg=""
+    if [ x"$directory" = x ]; then
         directory=/usr/local/bin
     fi
     chmod 755 $src
-    if [ "$mode" = "" ]; then
+    if [ x"$mode" = x ]; then
         echo
         success="Installed $src to $directory."
         failure="Failed to install $src."
@@ -165,41 +228,55 @@ install-file () {
     mv $src $directory && echo $success || echo $failure
 }
 
-install-lfetool () {
-    local script=$1
-    local directory=$2
-    local mode=$3
-    if [ "$directory" = "" ]; then
+install_lfetool () {
+    script=$1
+    directory=$2
+    mode=$3
+    if [ x"$directory" = x ]; then
         directory=/usr/local/bin
     fi
-    local url="https://raw.github.com/lfe/lfetool/master/lfetool"
-    local file=lfetool
-    cd /tmp/ &> /dev/null && \
-    download-file $url && \
-    install-file $file $directory $mode && \
-    cd - &> /dev/null
-    eval "${directory}/${file} -x"
+
+    if [ x"$mode" = x ]; then
+        cp $script $directory
+        if [ $? -ne 0 ]; then
+            echo cp $script $directory failed.
+            exit 1
+        fi
+
+        chmod 755 $directory/`basename $script`
+
+        echo
+        echo "Installed lfetool to $directory."
+    elif [ $mode = update ]; then
+        url="https://raw.github.com/lfe/lfetool/master/lfetool"
+        file=lfetool
+        cd /tmp/ > /dev/null 2>&1 && \
+        download_file $url && \
+        install_file $file $directory $mode && \
+        cd - > /dev/null 2>&1
+        eval "${directory}/${file} -x"
+    fi
 }
 
-install-lfe () {
-    local directory=$1
-    local url="https://github.com/rvirding/lfe.git"
-    local repo=lfe
-    local file=$repo
-    startdir=$(pwd)
-    cd /tmp/ &> /dev/null && \
-    clone-repo $url && \
+install_lfe () {
+    directory=$1
+    url="https://github.com/rvirding/lfe.git"
+    repo=lfe
+    file=$repo
+    startdir=`pwd`
+    cd /tmp/ > /dev/null 2>&1 && \
+    clone_repo $url && \
     cd $repo && make compile && \
-    ERL_LIBS=$(get-install-dir) make install && \
-    cd ../ &> /dev/null && \
+    ERL_LIBS=`get_install_dir` make install && \
+    cd .. > /dev/null 2>&1 && \
     rm -rf $repo && \
-    cd startdir &> /dev/null
+    cd startdir > /dev/null 2>&1
 }
 
-install-erlang () {
-    local release=$1
-    local directory=$2
-    if [ "$directory" = "" ]; then
+install_erlang () {
+    release=$1
+    directory=$2
+    if [ x"$directory" = x ]; then
         directory=/opt/erlang/$release
     fi
     kerl build $1 $1 && \
@@ -207,91 +284,91 @@ install-erlang () {
     echo "Installed Erlang." || echo "Failed to install Erlang."
 }
 
-install-kerl () {
-    local directory=$1
-    if [ "$directory" = "" ]; then
+install_kerl () {
+    directory=$1
+    if [ x"$directory" = x ]; then
         directory=/usr/local/bin
     fi
-    local url="https://raw.github.com/spawngrid/kerl/master/kerl"
-    local file=kerl
-    cd /tmp/ &> /dev/null && \
-    download-file $url && \
-    install-file $file $directory && \
-    cd - &> /dev/null
+    url="https://raw.github.com/spawngrid/kerl/master/kerl"
+    file=kerl
+    cd /tmp/ > /dev/null 2>&1 && \
+    download_file $url && \
+    install_file $file $directory && \
+    cd - > /dev/null 2>&1
 }
 
-install-rebar () {
-    local directory=$1
-    if [ "$directory" = "" ]; then
+install_rebar () {
+    directory=$1
+    if [ x"$directory" = x ]; then
         directory=/usr/local/bin
     fi
-    local url="https://github.com/rebar/rebar.git"
-    local repo=rebar
-    local file=$repo
-    clone-repo $url
+    url="https://github.com/rebar/rebar.git"
+    repo=rebar
+    file=$repo
+    clone_repo $url
     cd $repo && make && \
-    install-file $file $directory && \
-    cd - &> /dev/null
+    install_file $file $directory && \
+    cd - > /dev/null 2>&1
 }
 
-install-relx () {
-    local directory=$1
-    if [ "$directory" = "" ]; then
+install_relx () {
+    directory=$1
+    if [ x"$directory" = x ]; then
         directory=/usr/local/bin
     fi
-    local url="https://github.com/erlware/relx.git"
-    local repo=relx
-    local file=$repo
-    clone-repo $url
+    url="https://github.com/erlware/relx.git"
+    repo=relx
+    file=$repo
+    clone_repo $url
     cd $repo && make && \
-    install-file $file $directory && \
-    cd - &> /dev/null
+    install_file $file $directory && \
+    cd - > /dev/null 2>&1
 }
 
-install-expm () {
-    local directory=$1
-    if [ "$directory" = "" ]; then
+install_expm () {
+    directory=$1
+    if [ x"$directory" = x ]; then
         directory=/usr/local/bin
     fi
-    local url="http://expm.co/__download__/expm"
-    local file=expm
-    cd /tmp/ &> /dev/null && \
-    download-file $url && \
-    install-file $file $directory && \
-    cd - &> /dev/null
+    url="http://expm.co/__download__/expm"
+    file=expm
+    cd /tmp > /dev/null 2>&1 && \
+    download_file $url && \
+    install_file $file $directory && \
+    cd - > /dev/null 2>&1
 }
 
-install-erjang () {
-    local directory=$1
-    if [ "$directory" = "" ]; then
+install_erjang () {
+    directory=$1
+    if [ x"$directory" = x ]; then
         directory=/opt/erlang
     fi
     mkdir -p $directory
-    local url=https://github.com/trifork/erjang.git
-    local repo=erjang
-    local file=$repo
-    local startdir=$(pwd)
-    cd /tmp/ &> /dev/null && \
-    clone-repo $url && \
+    url=https://github.com/trifork/erjang.git
+    repo=erjang
+    file=$repo
+    startdir=`pwd`
+    cd /tmp/ > /dev/null 2>&1 && \
+    clone_repo $url && \
     cd $repo && ant alljar && \
-    cd ../ &> /dev/null && \
+    cd .. > /dev/null 2>&1 && \
     mv -v $repo $directory && \
-    cd $startdir &> /dev/null
+    cd $startdir > /dev/null 2>&1
 }
 
-_install-autocomplete () {
-    local directory="${HOME}/.lfetool/"
-    local file="bash-complete"
-    local url="https://raw.github.com/lfe/lfetool/master/$file"
+_install_autocomplete () {
+    directory="${HOME}/.lfetool/"
+    file="bash-complete"
+    url="https://raw.github.com/lfe/lfetool/master/$file"
     mkdir -p $directory
-    cd /tmp/ &> /dev/null && \
-    download-file $url && \
-    install-file $file $directory \
-    cd - &> /dev/null
+    cd /tmp > /dev/null 2>&1 && \
+    download_file $url && \
+    install_file $file $directory \
+    cd - > /dev/null 2>&1
 }
 
-install-autocomplete () {
-    _install-autocomplete
+install_autocomplete () {
+    _install_autocomplete
     echo
     echo "The lfetool autocomplete file has been created. To use, simply"
     echo "update your ~/.bashrc, ~/.bash_profile, or ~/.profile to include the"
@@ -304,93 +381,98 @@ install-autocomplete () {
     echo
 }
 
-update-lfetool () {
-    local script=$1
-    local path=`which lfetool`
-    if [ "$path" = "" ]; then
-      lfetool-not-found-error
+update_lfetool () {
+    script=$1
+    path=`which lfetool`
+    if [ x"$path" = x ]; then
+        lfetool_not_found_error
     fi
-    local directory=$(dirname $path)
-    echo -n "Current version: "
-    eval "lfetool -v"
-    cd /tmp/ &> /dev/null && \
-    install-lfetool $script $directory "update" && \
-    cd - &> /dev/null
-    echo -n "New version: "
-    eval "lfetool -v"
+    directory=`dirname $path`
+    echon "Current version: "
+    lfetool -v
+    cd /tmp > /dev/null 2>&1 && \
+    install_lfetool $script $directory update && \
+    cd - > /dev/null 2>&1
+    echon "New version: "
+    lfetool -v
     echo
-    _install-autocomplete
+    _install_autocomplete
     echo "Updated lfetool autocompletion file at ~/.lfetool/bash-complete."
 }
 
-update-deps () {
+update_deps () {
     echo "Updating dependencies ..."
     for DIR in ${DEPS}/*; do
         cd $DIR
         echo
-        echo -e "\tUpdating $DIR ..."
+        echoe "\tUpdating $DIR ..."
         echo
         git pull
-        cd - &> /dev/null
+        cd - > /dev/null 2>&1
     done
 }
 
-get-path () {
+get_path () {
     echo ${DEPS}/lfe/bin:/opt/erlang/erjang:$PATH
 }
 
-get-erl-libs () {
-    find $DEPS -maxdepth 1 -exec echo -n '{}:' \;|sed "s#\(.*$\)#\1$TEST_OUT_DIR:.#"
+get_erl_libs () {
+    find $DEPS -maxdepth 1 -exec printf "%s:" {} \; | sed "s#\(.*$\)#\1$TEST_OUT_DIR:.#"
 }
 
-get-versions () {
+construct_pa_ebin_option()
+{
+    echo $DEPS/*/ebin | tr ' ' '\n' | awk '{printf("-pa %s ", $1)} END{print "-pa ./ebin -pa .eunit"}'
+}
+
+get_versions () {
     echo
     echo "Getting version info ..."
     echo
-    APP_SRC=$(ls src/*app.src)
+    APP_SRC=`ls src/*app.src`
     PART1='io:format("~p~n", [proplists:get_value(vsn,element(3,element'
     PART2='(2,hd(element(3,erl_eval:exprs(element(2, erl_parse:parse_exprs'
     PART3='(element(2,erl_scan:string("Data = " ++ binary_to_list(element'
     PART4='(2,file:read_file("'
     PART5='"))))))), []))))))])'
     COMMAND=${PART1}${PART2}${PART3}${PART4}${APP_SRC}${PART5}
-    echo -n app.src: ''
-    erl -eval erl -eval "$COMMAND" -run init stop -noshell
-    echo -n package.exs: ''
+    echon app.src: ''
+    erl -eval "$COMMAND" -run init stop -noshell
+    echon package.exs: ''
     grep version package.exs |awk '{print $2}'|sed -e 's/,//g'
-    echo -n git tags: ''
-    echo \"$(git tag|tail -1)\"
+    echon git tags: ''
+    echo \"`git tag | tail -1`\"
 }
 
-clean-test-name () {
-    egrep -v '.*\.erl$'|sed -e 's/.beam//' -e 's/^.eunit\///'
+clean_test_name () {
+    egrep -v '.*\.erl$' | sed -e 's/.beam//' -e 's/^.eunit\///'
 }
 
-quote-test () {
+quote_test () {
     awk '{print "\x27" $1 "\x27"}'
 }
 
-strip-newlines () {
+strip_newlines () {
     tr '\n' ','|sed 's/,$//'
 }
 
-all-but-last-line () {
+all_but_last_line () {
     awk 'NR>1{print buf}{buf = $0}'
 }
 
-get-unit-tests () {
-    ls .eunit/unit*|clean-test-name|quote-test|strip-newlines
+get_unit_tests () {
+    ls .eunit/unit* | clean_test_name | quote_test | strip_newlines
 }
 
-get-integration-tests () {
-    ls .eunit/integration*|clean-test-name|quote-test|strip-newlines
+get_integration_tests () {
+    ls .eunit/integration* | clean_test_name | quote_test | strip_newlines
 }
 
-get-system-tests () {
-    ls .eunit/system*|clean-test-name|quote-test|strip-newlines
+get_system_tests () {
+    ls .eunit/system* | clean_test_name | quote_test | strip_newlines
 }
 
-clean-test-results () {
+clean_test_results () {
     # get rid of the redundant module prefixing for each line ...
     sed "s/  unit-.*-tests:/ /" | \
     sed "s/  integration-.*-tests:/ /" | \
@@ -405,32 +487,38 @@ clean-test-results () {
     sed "s/_/-/g"
 }
 
-format-test-result-line () {
-    local line="$1"
-    local pad=$(printf '%0.1s' "."{1..60})
-    local padlen=54
-    local dots=""
-    local len=0
-    if [[ $line == *failed* ]]; then
-        len=$((padlen - $(echo "$line"|wc -m) + 5))
-    else
-        len=$((padlen - $(echo "$line"|wc -m) + 3))
-    fi
+format_test_result_line () {
+    line="$1"
+    #pad=`printf '%0.1s' "."{1..60}`
+    pad="............................................................"  # 60 dots
+    padlen=54
+    dots=""
+    len=0
+
+    case $line in
+        *failed*)
+            len=`expr $padlen - \`echo "$line" | wc -m\` + 5`
+            ;;
+        *)
+            len=`expr $padlen - \`echo "$line" | wc -m\` + 3`
+            ;;
+    esac
     if [ "$len" -gt 0 ]; then
-        dots=$(printf '%*.*s ' 0 $len "$pad")
+        #dots=`printf '%*.*s ' 0 $len "$pad"`
+        dots=`$expr_cmd substr "$pad" 1 $len`
     fi
-    echo "$line"|sed "s/\.\.\. /$dots/"
+    echo "$line" | sed "s/\.\.\. /$dots/"
 }
 
-format-test-results () {
+format_test_results () {
     IFS=$'\n'
-    local input=$(cat)
+    input=`cat`
     for line in $input; do
-        format-test-result-line "$line"
+        format_test_result_line "$line"
     done
 }
 
-colorize-test-results () {
+colorize_test_results () {
     # color the successes
     sed "s/ok$/\[\\${BOLD_GREEN}ok\\${END_COLOR}\]/g" | \
     sed "s/\(Passed: .*\.\)/\\${BOLD_GREEN}\1\\${END_COLOR}/" | \
@@ -451,535 +539,603 @@ colorize-test-results () {
     sed "s/\(.*\)\(\[done in \(.* s\)\]\)\(.*\)/\1\\${BOLD_BLACK}Total module test time: \3\\${END_COLOR}\4/"
 }
 
-parse-test-results () {
-    clean-test-results | format-test-results | colorize-test-results
+parse_test_results () {
+    clean_test_results | format_test_results | colorize_test_results
 }
 
-get-parsed () {
-    local result=$1
-    echo "$result"|all-but-last-line|parse-test-results
+get_parsed () {
+    result=$1
+
+    echo "$result" | all_but_last_line | parse_test_results
 }
 
-build-tests () {
-    echo -e "${YELLOW}Removing old tests ...${END_COLOR}"
+build_tests () {
+    echoe "${YELLOW}Removing old tests ...${END_COLOR}"
     echo "rm -rf $TEST_OUT_DIR"
-    mkdir -vp $TEST_OUT_DIR
-    echo -e "${YELLOW}Compiling tests ...${END_COLOR}"
+    mkdir -p $TEST_OUT_DIR
+    echo "mkdir: created directory $TEST_OUT_DIR"
+
+    echoe "${YELLOW}Compiling tests ...${END_COLOR}"
     # compile any custom testing-centric modules needed only for running tests
-    PATH=`get-path` ERL_LIBS=`get-erl-libs` \
-        lfec -o $TEST_OUT_DIR $TEST_DIR/testing[-_]*.lfe && \
-        echo -e "${GREEN}Successfully compiled testing support modules." || \
-        echo -e "${RED}Could not compile one or more testing support modules."
-        echo -ne "$END_COLOR"
+    #PATH=`get_path` ERL_LIBS=`get_erl_libs` \
+    PATH="`get_path`" \
+        lfec `construct_pa_ebin_option` -o $TEST_OUT_DIR $TEST_DIR/testing[-_]*.lfe && \
+        echoe "${GREEN}Successfully compiled testing support modules." || \
+        echoe "${RED}Could not compile one or more testing support modules."
+        echoe "$END_COLOR"
     # compile actual test modules (unit, integration, system, etc.)
-    PATH=`get-path` ERL_LIBS=`get-erl-libs` \
-        lfec -o $TEST_OUT_DIR $TEST_DIR/*/*[_-]tests.lfe && \
-        echo -e "${GREEN}Successfully compiled test modules." || \
-        echo -e "${RED}Could not compile one or more test modules."
-        echo -ne "$END_COLOR"
+    #PATH=`get_path` ERL_LIBS=`get_erl_libs` \
+    PATH="`get_path`" \
+        lfec `construct_pa_ebin_option` -o $TEST_OUT_DIR $TEST_DIR/*/*[_-]tests.lfe && \
+        echoe "${GREEN}Successfully compiled test modules." || \
+        echoe "${RED}Could not compile one or more test modules."
+        echoe "$END_COLOR"
 }
 
-only-run-unit-tests () {
-    local status=0
-    echo -e "$BOLD_BLUE"
+only_run_unit_tests () {
+    status=0
+
+    echoe "$BOLD_BLUE"
     echo "------------------"
     echo "Running unit tests ..."
     echo "------------------"
-    echo -e "$END_COLOR"
-    result=$(PATH=`get-path` ERL_LIBS=`get-erl-libs` \
-        erl -pa .eunit -noshell \
-        -eval "$CASE_OPEN `get-unit-tests` $CASE_CLOSE"; \
-        echo $?);
-    status=$(echo "$result"|tail -1)
-    parsed=$(get-parsed "$result")
-    echo -e "$parsed"
+    echoe "$END_COLOR"
+    #result=`PATH=\`get_path\` ERL_LIBS=\`get_erl_libs\` \
+    result=`PATH="\`get_path\`" \
+        erl \`construct_pa_ebin_option\` -noshell \
+        -eval "$CASE_OPEN \`get_unit_tests\` $CASE_CLOSE"; \
+        echo $?`
+    status=`echo "$result" | tail -1`
+    parsed=`get_parsed "$result"`
+    echoe "$parsed"
+
     return $status
 }
 
-run-unit-tests () {
-    build-tests
-    only-run-unit-tests
+run_unit_tests () {
+    build_tests
+    only_run_unit_tests
 }
 
-only-run-integration-tests () {
-    local status=0
-    echo -e "$BOLD_BLUE"
+only_run_integration_tests () {
+    status=0
+
+    echoe "$BOLD_BLUE"
     echo "-------------------------"
     echo "Running integration tests ..."
     echo "-------------------------"
-    echo -e "$END_COLOR"
-    local result=$(PATH=`get-path` ERL_LIBS=`get-erl-libs` \
-        erl -pa .eunit -noshell \
-        -eval "$CASE_OPEN `get-integration-tests` $CASE_CLOSE"; \
-        echo $?);
-    status=$(echo "$result"|tail -1)
-    parsed=$(get-parsed "$result")
-    echo -e "$parsed"
+    echoe "$END_COLOR"
+    #result=`PATH=\`get_path\` ERL_LIBS=\`get_erl_libs\` \
+    result=`PATH="\`get_path\`" \
+        erl \`construct_pa_ebin_option\` -noshell \
+        -eval "$CASE_OPEN \`get_integration_tests\` $CASE_CLOSE"; \
+        echo $?`
+    status=`echo "$result" | tail -1`
+    parsed=`get_parsed "$result"`
+    echoe "$parsed"
+
     return $status
 }
 
-run-integration-tests () {
-    build-tests
-    only-run-integration-tests
+run_integration_tests () {
+    build_tests
+    only_run_integration_tests
 }
 
-only-run-system-tests () {
-    local status=0
-    echo -e "$BOLD_BLUE"
+only_run_system_tests () {
+    status=0
+
+    echoe "$BOLD_BLUE"
     echo "--------------------"
     echo "Running system tests ..."
     echo "--------------------"
-    echo -e "$END_COLOR"
-    result=$(PATH=`get-path` ERL_LIBS=`get-erl-libs` \
-        erl -pa .eunit -noshell \
-        -eval "$CASE_OPEN `get-system-tests` $CASE_CLOSE"; \
-        echo $?);
-    status=$(echo "$result"|tail -1)
-    parsed=$(get-parsed "$result")
-    echo -e "$parsed"
+    echoe "$END_COLOR"
+    #result=`PATH="\`get_path\`" ERL_LIBS=\`get_erl_libs\` \
+    result=`PATH="\`get_path\`" \
+        erl \`construct_pa_ebin_option\` -noshell \
+        -eval "$CASE_OPEN \`get_system_tests\` $CASE_CLOSE"; \
+        echo $?`
+    status=`echo "$result" | tail -1`
+    parsed=`get_parsed "$result"`
+    echoe "$parsed"
+
     return $status
 }
 
-run-system-tests () {
-    build-tests
-    only-run-system-tests
+run_system_tests () {
+    build_tests
+    only_run_system_tests
 }
 
-run-all-tests () {
-    local status=0
-    build-tests
-    only-run-unit-tests || status=$?
-    only-run-integration-tests || status=$?
-    only-run-system-tests || status=$?
+run_all_tests () {
+    status=0
+
+    build_tests
+    only_run_unit_tests || status=$?
+    only_run_integration_tests || status=$?
+    only_run_system_tests || status=$?
+
     return $status
 }
 
-clean-tests () {
+clean_tests () {
     echo "Removing EUnit test files ..."
-    rm -v $TEST_OUT_DIR/*.beam
+    rm $TEST_OUT_DIR/*.beam && echo "removed $TEST_OUT_DIR/*.beam"
 }
 
-create-dirs () {
-    local project=$1
-    mkdir -p $project/{src,test/unit,test/integration,test/system}
+create_dirs () {
+    project=$1
+
+    mkdir -p $project/src
+    mkdir -p $project/test/unit
+    mkdir $project/test/integration $project/test/system
 }
 
-create-yaws-dirs () {
-    local project=$1
-    mkdir -p $project/{www,etc,logs}
+create_yaws_dirs () {
+    project=$1
+    mkdir -p $project/www
+    mkdir $project/etc $project/logs
 }
 
-create-yaws-bootstrap-dirs () {
-    local project=$1
-    mkdir -p $project/{www/css,www/images,www/js,www/icons,www/fonts}
+create_yaws_bootstrap_dirs () {
+    project=$1
+    mkdir -p $project/www/css
+    mkdir $project/www/images  $project/www/js  $project/www/icons  $project/www/fonts
 }
 
-add-git-files () {
+add_git_files () {
     git init && git add * .gitignore .travis.yml
 }
 
-create-file () {
-    local data=$1
-    local filename=$2
-    local pattern=$3
-    local project=$4
-    if [ "$pattern" = "" ]; then
-        pattern="{{IGNORE}}"
-        project="{{IGNORE}}"
+create_file () {
+    data=$1
+    filename=$2
+    mypattern=$3  ## optional argument
+    myproject=$4  ## optional argument
+    if [ x"$mypattern" = x ]; then
+        mypattern="{{IGNORE}}"
+        myproject="{{IGNORE}}"
     fi
     echo $data | decode | LC_CTYPE=C LANG=C sed \
-        "s#$pattern#$project#g" > $filename
+        "s#$mypattern#$myproject#g" > $filename
 }
 
-create-project-files () {
-    local project=$1
-    create-file "$gitignore" $project/.gitignore
-    create-file "$rebarconfig" $project/rebar.config
-    create-file "$commonmk" $project/common.mk {{PROJECT}} $project
-    create-file "$travisci" $project/.travis.yml {{PROJECT}} $project
-    create-file "$readme" $project/README.rst {{PROJECT}} $project
-    create-file "$package" $project/package.exs {{PROJECT}} $project
+create_project_files () {
+    project=$1
+    create_file "$gitignore"   $project/.gitignore
+    create_file "$rebarconfig" $project/rebar.config
+    create_file "$commonmk"    $project/common.mk   {{PROJECT}} $project
+    create_file "$travisci"    $project/.travis.yml {{PROJECT}} $project
+    create_file "$readme"      $project/README.rst  {{PROJECT}} $project
+    create_file "$package"     $project/package.exs {{PROJECT}} $project
 }
 
-create-library-files () {
-    local project=$1
-    create-file "$libmakefile" $project/Makefile {{PROJECT}} $project
-    create-file "$libappsrc" $project/src/$project.app.src {{PROJECT}} $project
-    create-file "$libtestmodule" \
+create_library_files () {
+    project=$1
+    create_file "$libmakefile" $project/Makefile             {{PROJECT}} $project
+    create_file "$libappsrc"   $project/src/$project.app.src {{PROJECT}} $project
+    create_file "$libtestmodule" \
+        $project/test/unit/unit-${project}-tests.lfe     {{PROJECT}} $project
+    create_file "$libmodule"   $project/src/$project.lfe {{PROJECT}} $project
+}
+
+create_service_files () {
+    project=$1
+    create_file "$otpmk"       $project/otp.mk               {{PROJECT}} $project
+    create_file "$svcmakefile" $project/Makefile             {{PROJECT}} $project
+    create_file "$svcappsrc"   $project/src/$project.app.src {{PROJECT}} $project
+    create_file "$svctestmodule" \
         $project/test/unit/unit-${project}-tests.lfe {{PROJECT}} $project
-    create-file "$libmodule" $project/src/$project.lfe {{PROJECT}} $project
-}
-
-create-service-files () {
-    local project=$1
-    create-file "$otpmk" $project/otp.mk {{PROJECT}} $project
-    create-file "$svcmakefile" $project/Makefile {{PROJECT}} $project
-    create-file "$svcappsrc" $project/src/$project.app.src {{PROJECT}} $project
-    create-file "$svctestmodule" \
-        $project/test/unit/unit-${project}-tests.lfe {{PROJECT}} $project
-    create-file "$svcapp" \
-        $project/src/${project}-app.lfe {{PROJECT}} $project
-    create-file "$svcserver" \
+    create_file "$svcapp" \
+        $project/src/${project}-app.lfe    {{PROJECT}} $project
+    create_file "$svcserver" \
         $project/src/${project}-server.lfe {{PROJECT}} $project
-    create-file "$svcsup" \
-        $project/src/${project}-sup.lfe {{PROJECT}} $project
+    create_file "$svcsup" \
+        $project/src/${project}-sup.lfe    {{PROJECT}} $project
 }
 
-create-yaws-files () {
-    local project=$1
-    create-file "$yawsmk" $project/yaws.mk {{PROJECT}} $project
-    create-file "$yawsmakefile" $project/Makefile {{PROJECT}} $project
-    create-file "$yawsrebar" $project/rebar.config
-    create-file "$yawsconf" $project/etc/yaws.conf {{PROJECT}} $project
-    create-file "$svcappsrc" $project/src/$project.app.src {{PROJECT}} $project
-    create-file "$yawsmodule" $project/src/${project}.lfe {{PROJECT}} $project
-    create-file "$yawsroutesmodule" \
-        $project/src/${project}-routes.lfe {{PROJECT}} $project
-    create-file "$yawscontentmodule" \
+create_yaws_files () {
+    project=$1
+    create_file "$yawsmk"       $project/yaws.mk              {{PROJECT}} $project
+    create_file "$yawsmakefile" $project/Makefile             {{PROJECT}} $project
+    create_file "$yawsrebar"    $project/rebar.config
+    create_file "$yawsconf"     $project/etc/yaws.conf        {{PROJECT}} $project
+    create_file "$svcappsrc"    $project/src/$project.app.src {{PROJECT}} $project
+    create_file "$yawsmodule"   $project/src/${project}.lfe   {{PROJECT}} $project
+    create_file "$yawsroutesmodule" \
+        $project/src/${project}-routes.lfe  {{PROJECT}} $project
+    create_file "$yawscontentmodule" \
         $project/src/${project}-content.lfe {{PROJECT}} $project
-    create-file "$yawsutilmodule" \
-        $project/src/${project}-util.lfe {{PROJECT}} $project
-    create-file "$libtestmodule" \
+    create_file "$yawsutilmodule" \
+        $project/src/${project}-util.lfe    {{PROJECT}} $project
+    create_file "$libtestmodule" \
         $project/test/unit/unit-${project}-tests.lfe {{PROJECT}} $project
 }
 
-create-yaws-bootstrap-files () {
-    local project=$1
-    create-file "$yawsbootstrapcontentmodule" \
+create_yaws_bootstrap_files () {
+    project=$1
+    create_file "$yawsbootstrapcontentmodule" \
         $project/src/${project}-content.lfe {{PROJECT}} $project
-    create-file "$yawsbootstrapnavmodule" \
+    create_file "$yawsbootstrapnavmodule" \
         $project/src/${project}-nav.lfe {{PROJECT}} $project
-    create-file "$yawsbootstraproutesmodule" \
+    create_file "$yawsbootstraproutesmodule" \
         $project/src/${project}-routes.lfe {{PROJECT}} $project
-    create-file "$yawsbootstrapcss" $project/www/css/bootstrap.css
-    create-file "$yawsbootstrapcssmin" $project/www/css/bootstrap-min.css
-    create-file "$yawsbootstrapslatecss" $project/www/css/bootstrap-slate.css
-    create-file "$yawsbootstrapslatecssmin" \
+    create_file "$yawsbootstrapcss" $project/www/css/bootstrap.css
+    create_file "$yawsbootstrapcssmin" $project/www/css/bootstrap-min.css
+    create_file "$yawsbootstrapslatecss" $project/www/css/bootstrap-slate.css
+    create_file "$yawsbootstrapslatecssmin" \
         $project/www/css/bootstrap-slate-min.css
-    create-file "$yawsbootstrapjs" $project/www/js/bootstrap.js
-    create-file "$yawsbootstrapcssmin" $project/www/css/bootstrap-min.css
-    create-file "$yawsbootstrapjs" $project/www/js/bootstrap.js
-    create-file "$yawsbootstrapjsmin" $project/www/js/bootstrap-min.js
-    create-file "$yawsbootstrapfonteot" \
+    create_file "$yawsbootstrapjs" $project/www/js/bootstrap.js
+    create_file "$yawsbootstrapcssmin" $project/www/css/bootstrap-min.css
+    create_file "$yawsbootstrapjs" $project/www/js/bootstrap.js
+    create_file "$yawsbootstrapjsmin" $project/www/js/bootstrap-min.js
+    create_file "$yawsbootstrapfonteot" \
         $project/www/fonts/glyphicons-halflings-regular.eot
-    create-file "$yawsbootstrapfontsvg" \
+    create_file "$yawsbootstrapfontsvg" \
         $project/www/fonts/glyphicons-halflings-regular.svg
-    create-file "$yawsbootstrapfontttf" \
+    create_file "$yawsbootstrapfontttf" \
         $project/www/fonts/glyphicons-halflings-regular.ttf
-    create-file "$yawsbootstrapfontwoff" \
+    create_file "$yawsbootstrapfontwoff" \
         $project/www/fonts/glyphicons-halflings-regular.woff
 }
 
-post-create () {
-    local project=$1
-    cd $project && add-git-files && mkdir -p deps && make check-all-with-deps
+post_create () {
+    project=$1
+    cd $project && add_git_files && mkdir -p deps && make check-all-with-deps
 }
 
-setup-script-project () {
-    local script=$1
-    create-file "$scriptfile" $script
+setup_script_project () {
+    script=$1
+    create_file "$scriptfile" $script
     chmod 755 $script
 }
 
-setup-library-project () {
-    echo "Setting up starter library project ..."
-    local project=$1
-    create-dirs $project
-    create-project-files $project
-    create-library-files $project
-    post-create $project
+setup_library_project () {
+    project=$1
+
+    echo "Setting up starter library project $project ..."
+
+    create_dirs          $project
+    create_project_files $project
+    create_library_files $project
+    post_create          $project
 }
 
-setup-service-project () {
-    echo "Setting up starter OTP service project ..."
-    local project=$1
-    create-dirs $project
-    create-project-files $project
-    create-service-files $project
-    post-create $project
+setup_service_project () {
+    project=$1
+
+    echo "Setting up starter OTP service project $project ..."
+
+    create_dirs          $project
+    create_project_files $project
+    create_service_files $project
+    post_create          $project
 }
 
-setup-e2-service-project () {
-    #echo "Setting up starter e2 service project ..."
-    local project=$1
-    not-implemented-error
+setup_e2_service_project () {
+    project=$1
+
+    #echo "Setting up starter e2 service project $project ..."
+    not_implemented_error
 }
 
-setup-yaws-project () {
-    echo "Setting up default starter YAWS project ..."
-    local project=$1
-    create-dirs $project
-    create-yaws-dirs $project
-    create-project-files $project
-    create-yaws-files $project
-    post-create $project
+setup_yaws_project () {
+    project=$1
+
+    echo "Setting up default starter YAWS project $project ..."
+
+    create_dirs          $project
+    create_yaws_dirs     $project
+    create_project_files $project
+    create_yaws_files    $project
+    post_create          $project
 }
 
-setup-yaws-bootstrap-project () {
-    echo "Setting up Bootstrap starter YAWS project ..."
-    local project=$1
-    create-dirs $project
-    create-yaws-dirs $project
-    create-yaws-bootstrap-dirs $project
-    create-project-files $project
-    create-yaws-files $project
-    create-yaws-bootstrap-files $project
-    post-create $project
+setup_yaws_bootstrap_project () {
+    project=$1
+
+    echo "Setting up Bootstrap starter YAWS project $project ..."
+
+    create_dirs                 $project
+    create_yaws_dirs            $project
+    create_yaws_bootstrap_dirs  $project
+    create_project_files        $project
+    create_yaws_files           $project
+    create_yaws_bootstrap_files $project
+    post_create                 $project
 }
 
-create-new-yaws () {
-    local command=$1
-    local subcommand=$2
-    local arg=$3
+create_new_yaws () {
+    command=$1
+    subcommand=$2
+    arg=$3
     case $subcommand in
         default)
-            setup-yaws-project $arg
+            setup_yaws_project $arg
             ;;
         bootstrap)
-            setup-yaws-bootstrap-project $arg
+            setup_yaws_bootstrap_project $arg
             ;;
         simple)
-            setup-yaws-simple-project $arg
+            setup_yaws_simple_project $arg
             ;;
         *)
-            unknown-subcommand-error "$command $subcommand"
+            unknown_subcommand_error "$command $subcommand"
             ;;
     esac
 }
 
-create-new () {
-    local context=$1
-    local arg1=$2
-    local arg2=$3
+create_new () {
+    context=$1
+    arg1=$2
+    arg2=$3
+
     case $context in
         script)
-            setup-script-project $arg1
+            setup_script_project $arg1
             ;;
         library)
-            setup-library-project $arg1
+            setup_library_project $arg1
             ;;
         service)
-            setup-service-project $arg1
+            setup_service_project $arg1
             ;;
         e2service)
-            setup-e2-service-project $arg1
+            setup_e2_service_project $arg1
             ;;
         yaws)
             # check if arg2 is empty string; if so, assume no subcommand was
             # passed and use the default subcommand
-            if [ "$arg2" == "" ]; then
+            if [ x"$arg2" = x ]; then
                 arg2=$arg1
                 arg1="default"
             fi
-            create-new-yaws $context $arg1 $arg2
+            create_new_yaws $context $arg1 $arg2
             ;;
         *)
-            unknown-context-error $context
+            unknown_context_error $context
             ;;
     esac
 }
 
-do-install () {
-    local script=$1
-    local context=$2
-    local arg1=$3
-    local arg2=$4
+do_install () {
+    script=$1
+    context=$2
+    arg1=$3
+    arg2=$4
+
     # the default option is to install lfetool itself
-    if [ "$context" == "" ]; then
+    if [ x"$context" = x ]; then
         context="lfetool"
     fi
     case $context in
         lfetool)
-            install-lfetool $script $arg1
+            install_lfetool $script $arg1
             ;;
         lfe)
-            install-lfe
+            install_lfe
             ;;
         erlang)
-            install-erlang $arg1 $arg2
+            install_erlang $arg1 $arg2
             ;;
         kerl)
-            install-kerl $arg1
+            install_kerl $arg1
             ;;
         rebar)
-            install-rebar $arg1
+            install_rebar $arg1
             ;;
         relx)
-            install-relx $arg1
+            install_relx $arg1
             ;;
         expm)
-            install-expm $arg1
+            install_expm $arg1
             ;;
         erjang)
-            install-erjang $arg1
+            install_erjang $arg1
             ;;
         *)
-            unknown-context-error $context
+            unknown_context_error $context
             ;;
     esac
 }
 
-do-update () {
-    local script=$1
-    local context=$2
-    if [ "$context" == "" ]; then
+do_update () {
+    script=$1
+    context=$2
+
+    if [ x"$context" = x ]; then
         context="lfetool"
     fi
     case $context in
         lfetool)
-            update-lfetool $script
+            update_lfetool $script
             ;;
         deps)
-            update-deps
+            update_deps
             ;;
         *)
-            unknown-context-error $context
+            unknown_context_error $context
             ;;
     esac
 }
 
-do-tests () {
-    local context=$1
+do_tests () {
+    context=$1
+
     case $context in
         unit)
-            run-unit-tests
+            run_unit_tests
             ;;
         integration)
-            run-integration-tests
+            run_integration_tests
             ;;
         system)
-            run-system-tests
+            run_system_tests
             ;;
         all)
-            run-all-tests
+            run_all_tests
             ;;
         build)
-            build-tests
+            build_tests
             ;;
-        show-unit)
-            get-unit-tests
+        show_unit)
+            get_unit_tests
             ;;
-        show-integration)
-            get-integration-tests
+        show_integration)
+            get_integration_tests
             ;;
-        show-system)
-            get-system-tests
+        show_system)
+            get_system_tests
             ;;
         clean)
-            clean-tests
+            clean_tests
             ;;
         *)
-            unknown-context-error $context
+            unknown_context_error $context
             ;;
     esac
 }
 
-do-lfe-repl () {
-    command="PATH=$(get-path) ERL_LIBS=$(get-erl-libs) lfe $@"
-    #echo "$command"
-    eval "$command"
+do_lfe_repl () {
+    case $OS_TYPE in
+        Cygwin|Windows)
+            PATH="`get_path`" erl `construct_pa_ebin_option` -noshell -s lfe_shell start
+            ;;
+        *)
+            command="PATH=\"`get_path`\" ERL_LIBS=`get_erl_libs` lfe $@"
+            #echo "$command"
+            eval "$command"
+            ;;
+    esac
 }
 
-do-erlang-repl () {
-    eval "PATH=$(get-path) ERL_LIBS=$(get-erl-libs) erl $@"
+do_erlang_repl () {
+    case $OS_TYPE in
+        Cygwin|Windows)
+            PATH="`get_path`" werl `construct_pa_ebin_option` &
+            ;;
+        *)
+            eval "PATH=\"`get_path`\" ERL_LIBS=`get_erl_libs` erl $@"
+            ;;
+    esac
 }
 
-do-jerl-repl () {
+do_jerl_repl () {
     readline="rlwrap --command=jerl --prompt-colour=YELLOW --histsize=100000 --remember"
-    eval "PATH=$(get-path) ERL_LIBS=$(get-erl-libs) $readline jerl $@"
+    eval "PATH=\"`get_path`\" ERL_LIBS=`get_erl_libs` $readline jerl $@"
 }
 
-do-jlfe-repl () {
+do_jlfe_repl () {
     readline="rlwrap --command=jlfe --prompt-colour=YELLOW --histsize=100000 --remember"
-    eval "PATH=$(get-path) ERL_LIBS=$(get-erl-libs) $readline jerl -noshell -s lfe_shell $@"
+    eval "PATH=\"`get_path`\" ERL_LIBS=`get_erl_libs` $readline jerl -noshell -s lfe_shell $@"
 }
 
-do-repl () {
-    local context=$1
+do_repl () {
+    context=$1
     shift 1
+
     # the default option is to run the LFE REPL
-    if [ "$context" == "" ]; then
+    if [ x"$context" = x ]; then
         context="lfe"
     fi
     case $context in
         lfe)
-            do-lfe-repl "$@"
+            do_lfe_repl "$@"
             ;;
         erlang)
-            do-erlang-repl "$@"
+            do_erlang_repl "$@"
             ;;
         jerl)
-            do-jerl-repl "$@"
+            do_jerl_repl "$@"
             ;;
         jlfe)
-            do-jlfe-repl "$@"
+            do_jlfe_repl "$@"
             ;;
         *)
-            unknown-context-error $context
+            unknown_context_error $context
             ;;
     esac
 }
 
-do-info () {
-    local context=$1
+do_info () {
+    context=$1
+
     case $context in
         version)
-            get-versions
+            get_versions
             ;;
         erllibs)
-            get-erl-libs
+            get_erl_libs
             ;;
         installdir)
-            get-install-dir
+            get_install_dir
             ;;
         path)
-            get-path
+            get_path
             ;;
         *)
-            unknown-context-error $context
+            unknown_context_error $context
             ;;
     esac
 }
 
-check-context () {
-    local context=$1
-    if [ "$context" = "" ]; then
-        missing-context-error
+check_context () {
+    context=$1
+
+    if [ x"$context" = x ]; then
+        missing_context_error
     fi
 }
 
-check-arg () {
-    local arg=$1
-    if [ "$arg" = "" ]; then
-        missing-arg-error
+check_arg () {
+    arg=$1
+    if [ x"$arg" = x ]; then
+        missing_arg_error
+    fi
+}
+
+check_prerequisite () {
+    if ! which erl >/dev/null 2>&1 ; then
+        echo "Cannot find erl in PATH."
+        exit 1
+    fi
+
+    case $OS_TYPE in
+        Cygwin | Windows) rebar_exe="rebar.cmd" ;;
+        *) rebar_exe=rebar   ;;
+    esac
+
+    if ! which $rebar_exe >/dev/null 2>&1 ; then
+        echo "Cannot find $rebar_exe in PATH."
+        exit 1
     fi
 }
 
 run () {
-    if [ "$0" == "bash" ]; then
+    if [ "$0" = "bash" ] || [ $0 = "sh" ] || [ $0 = "ksh" ]; then
         # this script is being executed by the wrapper
-        local script=$1
-        local version=$2
-        local command=$3
-        local context=$4
-        local arg1=$5
-        local arg2=$6
+        script=$1
+        version=$2
+        command=$3
+        context=$4
+        arg1=$5
+        arg2=$6
     else
         # this script is being executed directly
-        local script=$0
-        local command=$1
-        local context=$2
-        local arg1=$3
-        local arg2=$4
+        script=$0
+        command=$1
+        context=$2
+        arg1=$3
+        arg2=$4
     fi
 
     case $command in
-        -h)
+        -h|help)
             echo
-            print-usage $script $version
+            print_usage $script $version
             exit 0
             ;;
-        -v)
+        -v|version)
             echo "$version"
             exit 0
             ;;
@@ -987,31 +1143,25 @@ run () {
             echo "Script has already been extracted."
             exit 1
             ;;
-        help)
-            $script -h
-            ;;
-        version)
-            $script -v
-            ;;
         extract)
             $script -x
             ;;
         install)
-            check-context $context
-            do-install $script $context $arg1 $arg2
+            do_install $script $context $arg1 $arg2
             ;;
         new)
-            check-context $context
-            check-arg $arg1
-            create-new $context $arg1 $arg2
+            check_prerequisite
+            check_context $context
+            check_arg $arg1
+            create_new $context $arg1 $arg2
             exit 0
             ;;
         update)
-            do-update $script $context
+            do_update $script $context
             exit 0
             ;;
         tests)
-            do-tests $context
+            do_tests $context
             ;;
         repl)
             # the repl command only functions properly if lfetool is not run
@@ -1021,7 +1171,7 @@ run () {
             # than the work around below.
             if [ "$0" == "bash" ]; then
                 echo
-                eval "$script -x" &> /dev/null
+                eval "$script -x" > /dev/null 2>&1
                 echo "In order to run the LFE REPL from this script, it has to"
                 echo "be executed in its uncompressed form. For your convenience,"
                 echo "the script has just been uncompressed. Please re-execute"
@@ -1030,17 +1180,21 @@ run () {
                 # at this point in the script, $@ contains $command, $context
                 # and any remaining args; only the remaining args should we pass
                 # on to Erlang/the JVM
-                shift 2
-                do-repl $context "$@"
+                if [ x"$context" = x ]; then
+                    shift 1
+                else
+                    shift 2
+                fi
+                do_repl $context "$@"
             fi
             ;;
         info)
-            do-info $context
+            do_info $context
             ;;
         *)
-            unknown-command-error $command
+            unknown_command_error $command
             ;;
     esac
 }
 
-run $@
+run "$@"

@@ -1,4 +1,5 @@
-#!/usr/bin/env bash
+#! /bin/sh
+#set -x
 
 version=0.3.2
 tooltemplate="plugins/lfetool/templates/lfetool.tmpl"
@@ -8,53 +9,69 @@ dest="lfetool"
 
 # load all the fillers from the plugins
 for FILE in `ls plugins/*/filler.sh`; do
-    source $FILE
+    . $FILE
 done
 
 # substitute template patterns with values
-fill-tool-var () {
+fill_tool_var () {
     local template=$1
     local pattern=$2
-    if [ "$pattern" = "" ]; then
+    if [ x"$pattern" = x ]; then
         pattern="{{NOOP}}"
     fi
-    data=`cat "$template" | base64`
+    ###data=`cat "$template" | base64`
     # DEBUG
     #echo $template
     #echo $pattern
     #echo $data
-    sed -e "s#$pattern#$data#g" $dest > $temp
+
+    awk -F= -v tmpl=$template -v pat=$pattern \
+        '{if (index($2, pat) > 0) {
+             printf("%s=\"", $1);
+             "base64 -w0 < " tmpl | getline b64;
+             printf("%s\"\n", b64)
+         } else { print } }' $dest > $temp
+
+    #sed -e "s#$pattern#$data#g" $dest > $temp
     mv $temp $dest
 }
 
-add-license () {
-    awk '{printf "# %s\n", $0}' < LICENSE|sed -e 's/[ ]*$//g'
+add_license () {
+    awk '{printf "# %s\n", $0}' LICENSE | sed -e 's/[ ]*$//g'
 }
 
-fill-templates () {
+fill_templates () {
     cp $tooltemplate $dest
-    fill-lfetool-files
-    fill-common-files
-    fill-script
-    fill-library-files
-    fill-service-files
-    fill-yaws-files
-    fill-yaws-bootstrap-files
-    echo "`add-license`" > $temp
-    cat $dest>>$temp
+    fill_lfetool_files # fill-tool-var plugins/lfetool/templates/usage.txt.tmpl {{USAGE}}
+
+    fill_common_files
+    fill_script
+    fill_library_files
+    fill_service_files
+    fill_yaws_files
+    fill_yaws_bootstrap_files
+    add_license > $temp
+    cat $dest >> $temp
     mv $temp $dest
 }
 
-compress-tool () {
-    data=`gzip --best --stdout $dest|base64`
-    echo "#!/usr/bin/env bash" > $temp
-    echo >> $temp
-    echo "`add-license`" >> $temp
-    echo >> $temp
-    cat << ENDSCRIPT >> $temp
-version=$version
-lfetool="$data"
+compress_tool () {
+    echo "#! /bin/sh" > $temp
+    echo "#set -x"    >> $temp
+    echo              >> $temp
+    add_license       >> $temp
+    echo              >> $temp
 
+    echo version=$version >> $temp
+
+    printf "lfetool="   >> $temp
+    gzip --best --stdout $dest | base64 -w 0 >> $temp
+    #printf "\"\n"         >> $temp
+
+    echo              >> $temp
+    echo              >> $temp
+
+    cat << ENDSCRIPT  >> $temp
 decode () {
     os=\`uname\`
     case \$os in
@@ -72,14 +89,14 @@ uncompress () {
 }
 
 run () {
-    local script=\$0
-    local command=\$1
+    script=\$0
+    command=\$1
     case \$command in
         -x)
             echo
             echo "Extracting file ..."
             tmp=/tmp/\`date "+%Y%d%m%H%M%S_lfetool"\`
-            echo "#!/usr/bin/env bash" > \$tmp
+            echo "#! /bin/sh" > \$tmp
             echo "" >> \$tmp
             echo "version=\$version" >> \$tmp
             echo "" >> \$tmp
@@ -106,8 +123,8 @@ ENDSCRIPT
 }
 
 run () {
-    fill-templates
-    compress-tool
+    fill_templates
+    compress_tool
     chmod 755 $dest
 }
 

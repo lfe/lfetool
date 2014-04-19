@@ -8,7 +8,7 @@ SOURCE_DIR = ./src
 OUT_DIR = ./ebin
 TEST_DIR = ./test
 TEST_OUT_DIR = ./.eunit
-SCRIPT_PATH=.:./bin:$(PATH):/usr/local/bin
+SCRIPT_PATH=.:./bin:"$(PATH)":/usr/local/bin
 
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
@@ -28,7 +28,7 @@ $(EXPM): $(BIN_DIR)
 
 get-deps:
 	@echo "Getting dependencies ..."
-	@rebar get-deps
+	@which rebar.cmd >/dev/null 2>&1 && rebar.cmd get-deps || rebar get-deps
 	@PATH=$(SCRIPT_PATH) lfetool update deps
 
 clean-ebin:
@@ -40,11 +40,11 @@ clean-eunit:
 
 compile: get-deps clean-ebin
 	@echo "Compiling project code and dependencies ..."
-	@rebar compile
+	@which rebar.cmd >/dev/null 2>&1 && rebar.cmd compile || rebar compile
 
 compile-no-deps: clean-ebin
 	@echo "Compiling only project code ..."
-	@rebar compile skip_deps=true
+	@which rebar.cmd >/dev/null 2>&1 && rebar.cmd compile skip_deps=true || rebar compile skip_deps=true
 
 compile-tests:
 	@PATH=$(SCRIPT_PATH) lfetool tests build
@@ -60,7 +60,7 @@ shell-no-deps: compile-no-deps
 	@PATH=$(SCRIPT_PATH) lfetool repl
 
 clean: clean-ebin clean-eunit
-	@rebar clean
+	@which rebar.cmd >/dev/null 2>&1 && rebar.cmd clean || rebar clean
 
 check-unit-only:
 	@PATH=$(SCRIPT_PATH) lfetool tests unit
