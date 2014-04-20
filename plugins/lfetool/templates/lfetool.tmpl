@@ -204,8 +204,7 @@ download_file () {
 
 get_install_dir () {
     #erl -eval 'io:fwrite(code:lib_dir()), halt().' -run init stop -noshell
-    erl -eval 'io:fwrite(re:replace(code:lib_dir(), "~", "~~", [{return,list}])), halt().' -run init stop -noshell
-
+    erl -eval 'io:fwrite(re:replace(code:lib_dir(), "~", "~~", [global, {return,list}])), halt().' -run init stop -noshell
 }
 
 install_file () {
