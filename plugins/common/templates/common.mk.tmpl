@@ -50,12 +50,12 @@ compile-tests:
 	@PATH=$(SCRIPT_PATH) lfetool tests build
 
 shell: compile
-	@clear
+	@which clear >/dev/null 2>&1 && clear || printf "\033c"
 	@echo "Starting shell ..."
 	@PATH=$(SCRIPT_PATH) lfetool repl
 
 shell-no-deps: compile-no-deps
-	@clear
+	@which clear >/dev/null 2>&1 && clear || printf "\033c"
 	@echo "Starting shell ..."
 	@PATH=$(SCRIPT_PATH) lfetool repl
 
