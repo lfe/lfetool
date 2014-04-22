@@ -7,6 +7,40 @@ compresstemplate="plugins/lfetool/templates/compressed.tmpl"
 temp="lfetool-temp"
 dest="lfetool"
 
+OS_TYPE=Unix
+case `uname -s` in
+    CYGWIN_NT*)
+        OS_TYPE=Cygwin
+        ;;
+    Windows_NT)
+        OS_TYPE=Windows
+        ;;
+    SunOS)
+        case `uname -r` in
+            4*) OS_TYPE=SUNBSD ;;
+            5*) OS_TYPE=SOLARIS ;;
+        esac
+        ;;
+    Linux)
+        OS_TYPE=LINUX
+        ;;
+    Darwin)
+        OS_TYPE=Darwin  ## Apple OS X
+        ;;
+    AIX)
+        OS_TYPE=AIX
+        ;;
+    HP-UX)
+        OS_TYPE=HP-UX
+        ;;
+    OSF1)
+        OS_TYPE=OSF1
+        ;;
+
+    *)
+        ;;
+esac
+
 # load all the fillers from the plugins
 for FILE in `ls plugins/*/filler.sh`; do
     . $FILE
@@ -25,10 +59,14 @@ fill_tool_var () {
     #echo $pattern
     #echo $data
 
-    awk -F= -v tmpl=$template -v pat=$pattern \
+    awk -F= -v tmpl=$template -v pat=$pattern -v OS=$OS_TYPE \
         '{if (index($2, pat) > 0) {
              printf("%s=\"", $1);
-             "base64 -w0 < " tmpl | getline b64;
+             if (OS == "Darwin") {
+                 "base64 -b 0 < " tmpl | getline b64;
+             } else {
+                 "base64 -w 0 < " tmpl | getline b64;
+             }
              printf("%s\"\n", b64)
          } else { print } }' $dest > $temp
 
@@ -65,7 +103,11 @@ compress_tool () {
     echo version=$version >> $temp
 
     printf "lfetool="   >> $temp
-    gzip --best --stdout $dest | base64 -w 0 >> $temp
+    if [ $OS_TYPE = Darwin ]; then
+        gzip --best --stdout $dest | base64 -b 0 >> $temp
+    else
+        gzip --best --stdout $dest | base64 -w 0 >> $temp
+    fi
     #printf "\"\n"         >> $temp
 
     echo              >> $temp

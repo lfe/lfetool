@@ -59,11 +59,42 @@ case `uname -s` in
         OS_TYPE=LINUX
         ;;
     Darwin)
-        OS_TYPE=Darwin
+        OS_TYPE=Darwin  ## Apple OS X
         ;;
+    AIX)
+        OS_TYPE=AIX
+        ;;
+    HP-UX)
+        OS_TYPE=HP-UX
+        ;;
+    OSF1)
+        OS_TYPE=OSF1
+        ;;
+
     *)
         ;;
 esac
+
+system_type()
+{
+    case $(uname -s) in
+        AIX)   print AIX ;;
+        HP-UX) print HP-UX ;;
+        SunOS)
+            case $(uname -r) in
+                4*) print SUNBSD ;;
+                5*) print SOLARIS ;;
+            esac
+            ;;
+        Linux) print LINUX ;;
+        Windows_NT) print WINDOWS ;;
+        CYGWIN_NT*) print WINDOWS ;;
+        IRIX ) print SGI ;;
+        OSF1 ) print DECOSF ;;
+        ULTRIX ) print ULTRIX ;;
+        *) print UNKNOWN ;;
+    esac
+}
 
 expr_cmd=expr
 if [ $OS_TYPE = SOLARIS ]; then
