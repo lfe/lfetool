@@ -1,0 +1,9 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+use MIME::Base64 qw(encode_base64);
+
+local($/) = undef;
+print encode_base64(<STDIN>, ""), "\n";
