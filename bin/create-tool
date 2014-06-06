@@ -1,4 +1,4 @@
-#! /bin/bash
+#! /usr/bin/env bash
 #set -x
 
 version=0.3.5
@@ -26,6 +26,9 @@ case `uname -s` in
         ;;
     Darwin)
         OS_TYPE=Darwin  ## Apple OS X
+        ;;
+    OpenBSD)
+        OS_TYPE=OpenBSD
         ;;
     AIX)
         OS_TYPE=AIX
@@ -65,7 +68,11 @@ fill_tool_var () {
              if (OS == "Darwin") {
                  "base64 -b 0 < " tmpl | getline b64;
              } else {
-                 "base64 -w 0 < " tmpl | getline b64;
+		if (OS == "OpenBSD") {
+		    "./bin/base64 < " tmpl | getline b64;
+                } else {
+		    "base64 -w 0 < " tmpl | getline b64;
+		}
              }
              printf("%s\"\n", b64)
          } else { print } }' $dest > $temp
@@ -99,7 +106,7 @@ add_warning () {
 }
 
 compress_tool () {
-    echo "#! /bin/bash" > $temp
+    echo "#! /usr/bin/env bash" > $temp
     echo "#set -x" >> $temp
     echo >> $temp
     add_warning >> $temp
@@ -113,7 +120,11 @@ compress_tool () {
     if [ $OS_TYPE = Darwin ]; then
         gzip --best --stdout $dest | base64 -b 0 >> $temp
     else
-        gzip --best --stdout $dest | base64 -w 0 >> $temp
+        if [ $OS_TYPE = OpenBSD ]; then
+	    gzip --best --stdout $dest | ./bin/base64 -w 0 >> $temp
+	else
+	    gzip --best --stdout $dest | base64 -w 0 >> $temp
+	fi
     fi
     #printf "\"\n" >> $temp
 
@@ -152,7 +163,7 @@ run () {
             echo
             echo "Extracting file ..."
             tmp=/tmp/\`date "+%Y%d%m%H%M%S_lfetool"\`
-            echo "#! /bin/bash" > \$tmp
+            echo "#! /usr/bin/env bash" > \$tmp
             echo "" >> \$tmp
 	    add_warning >> \$tmp
             echo "" >> \$tmp
