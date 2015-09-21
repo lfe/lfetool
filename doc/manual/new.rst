@@ -71,7 +71,7 @@ To run your new server:
 .. code:: shell
 
     $ cd my-new-service
-    $ make shell
+    $ make repl
 
 And then:
 
